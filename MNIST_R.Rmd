@@ -1,0 +1,337 @@
+---
+title: "IoA Project - MNIST_R"
+author: "Aravind"
+date: "March 13, 2018"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# DIGIT RECOGNIZER - IOA PROJECT
+
+# Read data : https://www.kaggle.com/c/digit-recognizer
+
+```{r}
+train <- read.csv("C:/Users/Aravind/Documents/Digit_Recognizer/train.csv")
+test <- read.csv("C:/Users/Aravind/Documents/Digit_Recognizer/test.csv")
+```
+
+# Dimensions of train and test
+
+```{r}
+dim(train)
+
+dim(test)
+```
+
+```{r}
+train$label <- as.factor(train$label)
+```
+
+
+# Visualization
+
+1st Image
+```{r}
+img<-matrix((train[1,2:ncol(train)]), nrow=28, ncol=28) #For the 1st Image
+img_numbers <- apply(img, 2, as.numeric)
+image(1:28, 1:28, img_numbers, col=gray((0:255)/255))
+```
+
+2nd Image
+```{r, warning=FALSE}
+img<-matrix((train[2,2:ncol(train)]), nrow=28, ncol=28) #For the 2nd Image
+img_numbers <- apply(img, 2, as.numeric)
+image(1:28, 1:28, img_numbers, col=gray((0:255)/255))
+```
+
+For the first ten rows
+```{r, fig.height = 8, fig.width = 8}
+par(mfrow=c(4, 3))
+for (i in 1:10){
+    img<-matrix((train[i,2:ncol(train)]), nrow=28, ncol=28)
+    img_numbers <- apply(img, 2, as.numeric)
+    image(1:28, 1:28, img_numbers, col=gray((0:255)/255))
+}
+
+```
+
+
+Average image of each digit
+```{r, fig.height=8, fig.width= 8}
+
+par(mfrow=c(4,3))
+img<-array(dim=c(10,28*28))
+for(i in 0:9){
+  img[i+1,]<-apply(train[train[,1]==i,-1],2,sum)
+  img[i+1,]<-img[i+1,]/255*255
+  im<-array(img[i+1,],dim=c(28,28))
+  im<-im[,28:1] #right side up
+  image(1:28,1:28,im,col = grey(0:255/255),main=i)
+}
+
+```
+
+# Split train data 
+```{r, warning=FALSE}
+require(caret)
+set.seed(123)
+index <- createDataPartition(train$label, p=0.80, list = F)
+train_set <- train[index,]
+test_set <- train[-index,]
+```
+
+# Scaling and Centering
+```{r}
+X <- train_set[,-1]
+X_scale <- X/255
+X_center <- scale(X_scale, center = T, scale = F)
+Y <- test_set[,-1]
+Y_scale <- Y/255
+Y_center <- scale(Y_scale, center = T, scale = F)
+```
+
+
+
+
+# Principal Component Analysis
+
+```{r}
+pca<-princomp(X_center)
+std_dev <- pca[1:250]$sdev
+pr_var <- std_dev^2
+prop_varex <- pr_var/sum(pr_var)
+
+
+```
+
+# Plot
+```{r, fig.height=8, fig.width= 8}
+plot(cumsum(prop_varex[1:250]), xlab = "Principal Component",
+     ylab = "Cumulative Proportion of Variance Explained",
+     type = "b")
+```
+
+Using first 250 components we can explain ~100% of variation
+
+# Spliting PCA components into train and test
+
+```{r}
+train_set_pca <- data.frame(predict(pca, newdata = train_set[,-1]))[1:250]
+train_set_pca$label <- train_set$label
+test_set_pca <- data.frame(predict(pca, newdata = test_set[,-1]))[1:250]
+test_set_pca$label <- test_set$label
+```
+
+#################----------------------#########################
+
+# Model Building
+
+
+# DECISION TREE
+```{r, warning=FALSE}
+require(rpart)
+model_rpart <- rpart(label ~., data = train_set_pca)
+```
+
+# Predict test_set
+```{r}
+pred_rpart <- predict(model_rpart, newdata = test_set_pca[-251],type = 'class')
+
+```
+
+# Confusion matrix
+```{r}
+cm = table('Actual Digit' = test_set_pca[, 251], 'Predicted Digit' =  pred_rpart)
+cm
+```
+
+# Accuracy
+```{r}
+print(sum(diag(cm))/sum(cm))
+```
+
+Decision tree gives an accurary of 60%
+
+##############----------------------###########################
+
+# Random Forest Model
+
+```{r, warning=FALSE}
+require(randomForest)
+model <- randomForest(label ~., data = train_set_pca, ntree = 100)
+
+```
+
+
+# Predict test_set
+```{r}
+pred <- predict(model, newdata = test_set_pca[-251])
+```
+
+# Confusion Matrix
+```{r}
+cm = table('Actual Digit' = test_set_pca[, 251], 'Predicted Digit' =  pred)
+cm
+```
+
+# Accuracy
+```{r}
+print(sum(diag(cm))/sum(cm))
+```
+
+Random Forest gives an accuracy of 93.9%
+
+############----------------##############
+
+############----------------##############
+
+# K-NN 
+
+```{r, warning=FALSE}
+require(class)
+model_knn_pred <- knn(train = train_set_pca[,-251], 
+                 test = test_set_pca[,-251],
+                 cl = train_set_pca[,251],
+                 k=3)
+```
+
+# Confusion Matrix
+```{r}
+cm_knn <- table('Actual Digit' = test_set_pca[, 251], 'Predicted Digit' =  model_knn_pred)
+cm_knn
+```
+
+# Accuracy
+```{r}
+print(sum(diag(cm_knn))/sum(cm_knn))
+```
+
+K-NN gives an accuracy of 96.8%
+
+############----------------##############
+
+# SVM
+```{r, warning=FALSE}
+require(e1071)
+model_svm = svm(formula = label ~ .,
+                 data = train_set_pca,
+                 type = 'C-classification',
+                 kernel = 'linear')
+```
+
+
+```{r}
+pred_svm <- predict(model_svm, newdata = test_set_pca[-251])
+```
+
+
+# Confusion Matrix
+```{r}
+cm_svm = table('Actual Digit' = test_set_pca[, 251], 'Predicted Digit' =  pred_svm)
+cm_svm
+```
+
+
+# Accuracy
+```{r}
+print(sum(diag(cm_svm))/sum(cm_svm))
+```
+
+SVM gives an accuracy of 92%
+
+##############---------------------########################
+
+# XG BOOST
+
+```{r, warning=FALSE, results="hide"}
+require(xgboost)
+model_xgb <- xgboost(data = as.matrix(train_set_pca[-251]), label = train_set_pca$label, nrounds = 500)
+
+```
+
+By using nround = 500, we are able to reduce rmse value from 4.2 to 0.16. The lesser it is the better your model performs.
+
+# Prediction
+```{r}
+pred_xgb <- predict(model_xgb, newdata = as.matrix(test_set_pca[-251]))
+pred_xgb <- (pred_xgb >= 0.5)
+```
+
+# Confusion Matrix
+```{r}
+cm_xgb <- table('Actual Digit' = test_set_pca[, 251], 'Predicted Digit' =  pred_xgb)
+cm_xgb
+```
+
+# Accuracy
+```{r}
+print(sum(cm_xgb[,2])/sum(cm_xgb))
+```
+
+XGBOOST gives an accuracy of 98.45%
+
+# Plot accuracy of each digits
+
+```{r}
+total <- apply(cm_xgb,1, sum)
+total <- array(total)
+total
+
+```
+
+```{r}
+crt <- c()
+for (i in 1:10){
+ crt[i] <- cm_xgb[i,2]
+} 
+crt 
+```
+
+```{r}
+result <- crt/total
+result
+
+```
+
+
+```{r}
+digits <- c(0:9)
+digits
+```
+
+```{r}
+result_df <- data.frame(digits = digits, accuracy = result)
+result_df$digits <- as.factor(result_df$digits)
+result_df$accuracy <- result_df$accuracy*100
+result_df$accuracy <- round(result_df$accuracy, digits = 2)
+result_df
+
+```
+
+```{r, warning=FALSE,fig.height=8, fig.width= 8}
+require(ggplot2)
+ggplot(result_df, aes(digits,accuracy, fill = digits)) + geom_bar(colour="black",stat = "identity") + coord_cartesian(ylim = c(80, 100))
+
+```
+
+The barplot shows the model struggles to identify the digit 0.
+
+# Lollipop Chart
+
+```{r, warning=FALSE, fig.height=8,fig.width=8}
+require(ggplot2)
+ggplot(result_df, aes(x=digits, y=accuracy, fill = digits)) +
+  geom_segment( aes(x=digits, xend=digits, y=80, yend=accuracy), size=2, color="blue", linetype="solid" ) +
+  geom_point( size=10, color="pink", fill=alpha("red", 0.3), alpha=0.7, shape=21, stroke=2) + 
+  theme_light()
+
+```
+
+
+
+
